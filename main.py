@@ -11,6 +11,7 @@ import math
 tf.logging.set_verbosity(tf.logging.ERROR)
     
 def main():
+    batch_size = 100
     timestamp = int(time.time())
     model_name = ''.join([str(timestamp), '_', 'dense', '_', 'mnist'])
     session_logdir = os.path.join('./logs/', model_name)
@@ -49,12 +50,14 @@ def main():
     logits = binn_mlp_mnist(features, use_bias=True, training=is_training)
 
     with tf.name_scope('trainer_optimizer'):
-        learning_rate = tf.Variable(1e-3, name='learning_rate')
+        learning_rate = tf.Variable(3e-3, name='learning_rate')
         learning_rate_decay = tf.placeholder(tf.float32, shape=(), name='lr_decay')
         update_learning_rate = tf.assign(learning_rate, learning_rate / learning_rate_decay)
         optimizer=tf.train.AdamOptimizer(learning_rate=learning_rate)
         cross_entropy=tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logits, labels=labels)
         loss = tf.reduce_mean(cross_entropy)
+        #target = tf.placeholder(tf.float32, shape=[None, 10])
+        #loss = tf.reduce_mean(tf.square(tf.maximum(0.,1.-target*logits)))
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
             global_step = tf.train.get_or_create_global_step()
             train_op = optimizer.minimize(loss=loss, global_step=global_step)
@@ -79,8 +82,8 @@ def main():
 # network weights saver
     saver = tf.train.Saver()
 
-    NUM_BATCHES_TRAIN = math.ceil(x_train.shape[0] / 32)
-    NUM_BATCHES_TEST = math.ceil(x_test.shape[0] / 32)
+    NUM_BATCHES_TRAIN = math.ceil(x_train.shape[0] / batch_size)
+    NUM_BATCHES_TEST = math.ceil(x_test.shape[0] / batch_size)
 
 
     with tf.Session() as sess:
@@ -96,7 +99,7 @@ def main():
 		
 		
 		# initialize training dataset and set batch normalization training
-            sess.run(train_initialization, feed_dict={data_features:x_train, data_labels:y_train, N:32})
+            sess.run(train_initialization, feed_dict={data_features:x_train, data_labels:y_train, N:batch_size})
             sess.run(metrics_initializer)
             sess.run(switch_training_inference)
 	    
@@ -117,7 +120,7 @@ def main():
 		
 		
 		# initialize the test dataset and set batc normalization inference
-            sess.run(test_initialization, feed_dict={data_features:x_test, data_labels:y_test, N:32})
+            sess.run(test_initialization, feed_dict={data_features:x_test, data_labels:y_test, N:batch_size})
             sess.run(metrics_initializer)
             sess.run(switch_training_inference)
 		
