@@ -3,7 +3,7 @@ import tensorflow as tf
 from binn_misc import sign_binarize
 
 def binn_mlp_mnist(inp, weights, biases, use_bias=True, training=True):
-    momentum = .9
+    alpha = .9
     epsilon = 1e-4
     inp = tf.nn.dropout(inp, rate=.2)
     inp = tf.contrib.layers.flatten(inp)
