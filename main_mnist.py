@@ -3,7 +3,8 @@ import numpy as np
 import time
 import math
 from tensorflow.examples.tutorials.mnist import input_data
-from binn_mlp import binn_mlp_mnist
+from bnn_mlp import binn_mlp_mnist
+from bnn_misc import compute_gradients
 
 def one_hot_labels(labels, dimension=10):
     res = np.zeros((labels.shape[0], dimension))
@@ -13,7 +14,6 @@ def one_hot_labels(labels, dimension=10):
 
 # A function that shuffles a dataset, credits to https://github.com/uranusx86/BinaryNet-on-tensorflow
 def shuffle(X,y):
-    print(len(X))
     shuffle_parts = 1
     chunk_size = int(len(X)/shuffle_parts)
     shuffled_range = np.arange(chunk_size)
@@ -35,11 +35,10 @@ def shuffle(X,y):
 
     return X,y
 
-def train_epoch(inp, y, training, X, lab, sess, train_step, batch_size=100):
+def train_epoch(inp, y, training, acc, lo, X, lab, sess, train_kern_step, train_bn_step, batch_size=100):
     batches = int(len(X)/batch_size)
     for i in range(batches):
-        sess.run([train_step], feed_dict={inp:X[i*batch_size:(i+1)*batch_size], y: lab[i*batch_size:(i+1)*batch_size], training:True})
-
+        hist0 = sess.run([train_kern_step, train_bn_step], feed_dict={inp:X[i*batch_size:(i+1)*batch_size], y: lab[i*batch_size:(i+1)*batch_size], training:True})
 
 def main():
     batch_size = 100
@@ -53,40 +52,50 @@ def main():
     learning_rate_end = 3e-7
     learning_rate_decay = (learning_rate_end/learning_rate_start)**(1./epochs)
     mnist_data = input_data.read_data_sets("MNIST_data/", one_hot=True)
+    for i in range(mnist_data.train.images.shape[0]):
+        mnist_data.train.images[i] = mnist_data.train.images[i] * 2 - 1
+    for i in range(mnist_data.test.images.shape[0]):
+        mnist_data.test.images[i] = mnist_data.test.images[i] * 2 - 1
+    for i in range(mnist_data.train.labels.shape[0]):
+        mnist_data.train.labels[i] = mnist_data.train.labels[i] * 2 - 1
+    for i in range(mnist_data.test.labels.shape[0]):
+        mnist_data.test.labels[i] = mnist_data.test.labels[i] * 2 - 1
+        
     inp = tf.placeholder(tf.float32, [None, n_input])
     y = tf.placeholder(tf.float32, [None, n_output])
     training = tf.placeholder(tf.bool)
-    g_step = tf.Variable(0, trainable=False)
-    learning_rate = tf.train.exponential_decay(learning_rate_start, global_step = g_step, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=learning_rate_decay)
-    weights = { #Glorot normal initializer, draws samples from a truncated normal distribution centered at 0 with std dev = sqrt(2/(fan_in + fan_out))
-    'w0': tf.Variable(tf.truncated_normal([n_input, n_hidden], stddev=np.sqrt(2/(n_input+n_hidden)))), 
-    'w1': tf.Variable(tf.truncated_normal([n_hidden, n_hidden], stddev=np.sqrt(2/(n_hidden+n_hidden)))), 
-    'w2': tf.Variable(tf.truncated_normal([n_hidden, n_hidden], stddev=np.sqrt(2/(n_hidden+n_hidden)))),
-    'w3': tf.Variable(tf.truncated_normal([n_hidden, n_output], stddev=np.sqrt(2/(n_hidden+n_output))))
-    }
-    biases = {
-    'b0': tf.Variable(tf.constant(0.1, shape=[n_hidden])),
-    'b1': tf.Variable(tf.constant(0.1, shape=[n_hidden])),
-    'b2': tf.Variable(tf.constant(0.1, shape=[n_hidden])),
-    'b3': tf.Variable(tf.constant(0.1, shape=[n_output]))
-    }
-    
-    res = binn_mlp_mnist(inp, weights, biases, use_bias = True, training=training)
+    g_step_kern = tf.Variable(0, trainable=False)
+    g_step_bn = tf.Variable(0, trainable=False)
+    learning_rate = tf.train.exponential_decay(learning_rate_start, global_step = g_step_kern, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=learning_rate_decay)
+    res = binn_mlp_mnist(inp, use_bias = True, training=training)
     cross_entropy = tf.square(tf.maximum(0., 1.-y*res))
     loss = tf.reduce_mean(cross_entropy)
-    all_trainable_vars = [var for var in tf.trainable_variables()]
-    train_step = tf.train.AdamOptimizer(learning_rate).minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step)
+    all_trainable_vars = [var for var in tf.trainable_variables() if not var.name.endswith('kernel:0')]
+    print("--All Trainable Vars------------------------>>>>>>>")
+    print(all_trainable_vars)
+    print("--End All Trainable Vars-------------------->>>>>>>")
+    update_operations = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    print("--Update Ops-------------------------------->>>>>>>")
+    print(update_operations)
+    print("--End Update Ops---------------------------->>>>>>>")
+    with tf.control_dependencies(update_operations):
+        optimizer = tf.train.AdamOptimizer(learning_rate)
+        train_kernel_step = optimizer.apply_gradients(compute_gradients(loss, optimizer), global_step=g_step_kern)
+        train_bn_step = optimizer.minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step_bn)
     correct_pred = tf.equal(tf.argmax(res, 1), tf.argmax(y, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
     init = tf.global_variables_initializer()
     sess= tf.Session()
     sess.run(init)
+    saver = tf.train.Saver()
 
     old_acc = 0.0
+    store_epoch = 0
     X_train, y_train = shuffle(mnist_data.train.images, mnist_data.train.labels)
+    t_start = time.time()
     for i in range(epochs):
-        train_epoch(inp, y, training, X_train, y_train, sess, train_step, batch_size)
+        train_epoch(inp, y, training, accuracy, loss, X_train, y_train, sess, train_kernel_step, train_bn_step, batch_size)
         X_train, y_train = shuffle(mnist_data.train.images, mnist_data.train.labels)
 
         hist = sess.run([accuracy, loss],
@@ -95,11 +104,15 @@ def main():
                         y: mnist_data.test.labels,
                         training: False
                     })
-        print(hist)
+        print("Epoch %d, Test Acc: %f, Loss %f, Current Best Acc: %f" % (i, hist[0], hist[1], old_acc))
 
         if hist[0] > old_acc:
             old_acc = hist[0]
+            store_epoch = i
             save_path = saver.save(sess, "./binn_model/model.ckpt")
+    t_end = time.time()
+    print("Completed in %f hours" % ((t_end - t_start)/3600.))
+    print("Best Accuarcy: %f, Train Epoch on which achieved best accuracy: %d" % (old_acc, store_epoch))
 
 if __name__ == '__main__':
     main()
