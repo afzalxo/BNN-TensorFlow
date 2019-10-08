@@ -7,24 +7,25 @@ def binn_mlp_mnist(inp, use_bias=True, training=True):
     epsilon = 1e-4
     inp = tf.nn.dropout(inp, rate=.2)
     inp = tf.contrib.layers.flatten(inp)
-    l0,l0_w,l0_b = bin_dense_layer(inp, 4096, use_bias=use_bias, bin_inp=False, training=training, name='bin_dense_l0')
+    inp = sign_binarize(inp)
+    l0= bin_dense_layer(inp, 4096, use_bias=use_bias, bin_inp=False, training=training, name='bin_dense_l0')
     l0_bn = tf.layers.batch_normalization(l0, training=training, momentum=alpha, epsilon=epsilon)
     l0_htanh = sign_binarize(l0_bn)
     l0_htanh = tf.layers.dropout(l0_htanh, rate=.5, training=training)
 
-    l1,l1_w,l1_b = bin_dense_layer(l0_htanh, 4096, use_bias = use_bias, bin_inp=True, training=training, name='bin_dense_l1')
+    l1= bin_dense_layer(l0_htanh, 4096, use_bias = use_bias, bin_inp=True, training=training, name='bin_dense_l1')
     l1_bn = tf.layers.batch_normalization(l1, training=training, momentum=alpha, epsilon=epsilon)
     l1_htanh = sign_binarize(l1_bn)
     l1_htanh = tf.layers.dropout(l1_htanh, rate=.5, training=training)
 
-    l2, l2_w, l2_b = bin_dense_layer(l1_htanh, 4096, use_bias=use_bias, bin_inp=True, training=training, name='bin_dense_l2')
+    l2= bin_dense_layer(l1_htanh, 4096, use_bias=use_bias, bin_inp=True, training=training, name='bin_dense_l2')
     l2_bn = tf.layers.batch_normalization(l2, training=training, momentum=alpha, epsilon=epsilon)
     l2_htanh = sign_binarize(l2_bn)
     l2_htanh = tf.layers.dropout(l2_htanh, rate=.5, training=training)
 
-    l3, l3_w, l3_b = bin_dense_layer(l2_htanh, 10, use_bias=use_bias, bin_inp=True, training=training, name='bin_dense_l3')
+    l3= bin_dense_layer(l2_htanh, 10, use_bias=use_bias, bin_inp=True, training=training, name='bin_dense_l3')
     l3_bn = tf.layers.batch_normalization(l3, training=training, momentum=alpha, epsilon=epsilon)
 
-    return l3_bn, l0_w, l0_b, l1_w, l1_b, l2_w, l2_b, l3_w, l3_b
+    return l3_bn
 
 

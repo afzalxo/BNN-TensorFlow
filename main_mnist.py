@@ -50,9 +50,12 @@ def main():
     drop_in = 0.2
     drop_hidden = 0.5
     epochs = 10
-    learning_rate_start = 3e-2
-    learning_rate_end = 3e-7
+    learning_rate_start = 3e-3
+    learning_rate_end = 3e-5
     learning_rate_decay = (learning_rate_end/learning_rate_start)**(1./epochs)
+    lr_mod_start = 1.e-0
+    lr_mod_end = 1.e-3
+    lr_mod_decay = (lr_mod_end/lr_mod_start)**(1./epochs)
     mnist_data = input_data.read_data_sets("MNIST_data/", one_hot=True)
     for i in range(mnist_data.train.images.shape[0]):
         mnist_data.train.images[i] = mnist_data.train.images[i] * 2 - 1
@@ -67,12 +70,14 @@ def main():
     y = tf.placeholder(tf.float32, [None, n_output])
     training = tf.placeholder(tf.bool)
     g_step_kern = tf.Variable(0, trainable=False)
-    g_step_bn = tf.Variable(0, trainable=False)
+    g_step_mod = tf.Variable(0, trainable=False)
     learning_rate = tf.train.exponential_decay(learning_rate_start, global_step = g_step_kern, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=learning_rate_decay)
-    res, l0_w, l0_b, l1_w, l1_b, l2_w, l2_b, l3_w, l3_b = binn_mlp_mnist(inp, use_bias = True, training=training)
+    lr_mod = tf.train.exponential_decay(lr_mod_start, global_step = g_step_mod, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=lr_mod_decay)
+    res = binn_mlp_mnist(inp, use_bias = True, training=training)
     cross_entropy = tf.square(tf.maximum(0., 1.-y*res))
     loss = tf.reduce_mean(cross_entropy)
-    all_trainable_vars = [var for var in tf.trainable_variables()]
+    all_trainable_vars = [var for var in tf.trainable_variables()]# if not var.name.endswith('modulo:0')]
+    #train_mod_vars = [var for var in tf.trainable_variables() if var.name.endswith('modulo:0')]
     print("--All Trainable Vars------------------------>>>>>>>")
     print(all_trainable_vars)
     print("--End All Trainable Vars-------------------->>>>>>>")
@@ -85,7 +90,12 @@ def main():
     print("--End Update Ops---------------------------->>>>>>>")
     with tf.control_dependencies(update_operations):
         optimizer = tf.train.AdamOptimizer(learning_rate)
-        train_bn_step = optimizer.minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step_bn)
+        #optimizer_mod = tf.train.AdamOptimizer(lr_mod)
+        #grad_w = optimizer.compute_gradients(loss = loss, var_list = all_trainable_vars)
+        #train_bn_step = optimizer.apply_gradients(grad_w, global_step = g_step_kern)
+        #grad_m = optimizer_mod.compute_gradients(loss = loss, var_list = train_mod_vars)
+        #train_mod_step = optimizer_mod.apply_gradients(grad_m, global_step = g_step_mod)
+        train_bn_step = optimizer.minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step_kern)
     correct_pred = tf.equal(tf.argmax(res, 1), tf.argmax(y, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
