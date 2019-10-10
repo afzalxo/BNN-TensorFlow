@@ -37,11 +37,14 @@ def shuffle(X,y):
 
     return X,y
 
-def train_epoch(inp, y, training, acc, lo, X, lab, sess, train_bn_step, batch_size=100):
+def train_epoch(inp, y, grad_m, training, acc, lo, X, lab, sess, train_bn_step, train_mod_step, batch_size=100):
     batches = int(len(X)/batch_size)
     for i in range(batches):
-        hist0 = sess.run([acc, lo, train_bn_step], feed_dict={inp:X[i*batch_size:(i+1)*batch_size], y: lab[i*batch_size:(i+1)*batch_size], training:True})
-        print(hist0[0], hist0[1])
+        hist0 = sess.run([acc, lo, grad_m, train_bn_step, train_mod_step], feed_dict={inp:X[i*batch_size:(i+1)*batch_size], y: lab[i*batch_size:(i+1)*batch_size], training:True})
+        print("Train accuracy: %f, Loss: %f" % (hist0[0], hist0[1]))
+        #for grad, v in hist0[2]:
+        #    print(grad[1000:1002], v[1000:1002])
+
 def main():
     batch_size = 100
     n_input = 28*28
@@ -50,11 +53,11 @@ def main():
     drop_in = 0.2
     drop_hidden = 0.5
     epochs = 10
-    learning_rate_start = 3e-3
+    learning_rate_start = 3e-2
     learning_rate_end = 3e-5
     learning_rate_decay = (learning_rate_end/learning_rate_start)**(1./epochs)
-    lr_mod_start = 1.e-0
-    lr_mod_end = 1.e-3
+    lr_mod_start = 3.e-2
+    lr_mod_end = 3.e-5
     lr_mod_decay = (lr_mod_end/lr_mod_start)**(1./epochs)
     mnist_data = input_data.read_data_sets("MNIST_data/", one_hot=True)
     for i in range(mnist_data.train.images.shape[0]):
@@ -73,13 +76,14 @@ def main():
     g_step_mod = tf.Variable(0, trainable=False)
     learning_rate = tf.train.exponential_decay(learning_rate_start, global_step = g_step_kern, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=learning_rate_decay)
     lr_mod = tf.train.exponential_decay(lr_mod_start, global_step = g_step_mod, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=lr_mod_decay)
-    res = binn_mlp_mnist(inp, use_bias = True, training=training)
+    res = binn_mlp_mnist(inp, training=training)
     cross_entropy = tf.square(tf.maximum(0., 1.-y*res))
     loss = tf.reduce_mean(cross_entropy)
-    all_trainable_vars = [var for var in tf.trainable_variables()]# if not var.name.endswith('modulo:0')]
-    #train_mod_vars = [var for var in tf.trainable_variables() if var.name.endswith('modulo:0')]
+    all_trainable_vars = [var for var in tf.trainable_variables() if not var.name.endswith('modulo:0')]
+    train_mod_vars = [var for var in tf.trainable_variables() if var.name.endswith('modulo:0')]
     print("--All Trainable Vars------------------------>>>>>>>")
     print(all_trainable_vars)
+    print(train_mod_vars)
     print("--End All Trainable Vars-------------------->>>>>>>")
     print("--All Global Vars------------------------>>>>>>>")
     print([var for var in tf.global_variables()])
@@ -90,12 +94,12 @@ def main():
     print("--End Update Ops---------------------------->>>>>>>")
     with tf.control_dependencies(update_operations):
         optimizer = tf.train.AdamOptimizer(learning_rate)
-        #optimizer_mod = tf.train.AdamOptimizer(lr_mod)
-        #grad_w = optimizer.compute_gradients(loss = loss, var_list = all_trainable_vars)
-        #train_bn_step = optimizer.apply_gradients(grad_w, global_step = g_step_kern)
-        #grad_m = optimizer_mod.compute_gradients(loss = loss, var_list = train_mod_vars)
-        #train_mod_step = optimizer_mod.apply_gradients(grad_m, global_step = g_step_mod)
-        train_bn_step = optimizer.minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step_kern)
+        optimizer_mod = tf.train.AdamOptimizer(lr_mod)
+        grad_w = optimizer.compute_gradients(loss = loss, var_list = all_trainable_vars)
+        train_bn_step = optimizer.apply_gradients(grad_w, global_step = g_step_kern)
+        grad_m = optimizer_mod.compute_gradients(loss = loss, var_list = train_mod_vars)
+        train_mod_step = optimizer_mod.apply_gradients(grad_m, global_step = g_step_mod)
+        #train_bn_step = optimizer.minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step_kern)
     correct_pred = tf.equal(tf.argmax(res, 1), tf.argmax(y, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
 
@@ -109,7 +113,7 @@ def main():
     X_train, y_train = shuffle(mnist_data.train.images, mnist_data.train.labels)
     t_start = time.time()
     for i in range(epochs):
-        train_epoch(inp, y, training, accuracy, loss, X_train, y_train, sess, train_bn_step, batch_size)
+        train_epoch(inp, y, grad_m, training, accuracy, loss, X_train, y_train, sess, train_bn_step, train_mod_step, batch_size)
         X_train, y_train = shuffle(mnist_data.train.images, mnist_data.train.labels)
 
         hist = sess.run([accuracy, loss],

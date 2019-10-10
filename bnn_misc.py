@@ -9,24 +9,18 @@ def sign_binarize(inp):
     round_fin = h_sig + tf.stop_gradient(round_out - h_sig)
     return (2.*round_fin - 1.)
 
-def bin_dense_layer(in_act, num_out, use_bias=True, bin_inp=True, training=True, name='Bin_Dense_L'):
+def bin_dense_layer(in_act, num_out, training=True, name='Bin_Dense_L'):
     with tf.variable_scope(name+'_params', reuse=False):
         l_w = tf.get_variable('weight', [in_act.shape[1], num_out], initializer = tf.random_uniform_initializer(-1, 1), constraint=lambda w: tf.clip_by_value(w, -1., 1.), trainable=True)
         l_b = tf.get_variable('bias', [num_out], initializer=tf.zeros_initializer(), trainable=True)
-        l_mod = tf.get_variable('modulo', [num_out], initializer=tf.random_uniform_initializer(-10, 10), constraint=lambda w: w, dtype=tf.float32, trainable=True)
+        l_mod = tf.get_variable('modulo', [1], initializer=tf.random_uniform_initializer(-1, 1), constraint=lambda w: w, dtype=tf.float32, trainable=True)
     tf.add_to_collection(name+'_w', l_w)
     layer_names.append(name)
     bin_w = sign_binarize(l_w)
     res = tf.matmul(in_act, bin_w)
-    res = (tf.nn.bias_add(res, sign_binarize(l_b))) if use_bias else res
-    #ones_vec = tf.ones(shape=[None, num_out], dtype=tf.float32)
-    #casted_min = ones_vec * min_val
-    #print(castd_min, res.shape)
-    #casted_min = tf.reshape(min_val,shape=[None, num_out])
-    #l_mod = max_val-200
-    #res1 = tf.mod(res+min_val, l_mod)
-    #res = res1 - tf.math.reduce_mean(res1)
-    res = res % l_mod
+    res = (tf.nn.bias_add(res, sign_binarize(l_b)))
+    #res = tf.floormod(res, l_mod)
+    res = tf.floormod(res, 200.1) + tf.floormod(0.98, l_mod)
     return res
 
 def compute_gradients(loss, optimizer):
