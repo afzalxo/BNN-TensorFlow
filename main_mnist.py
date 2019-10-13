@@ -5,8 +5,13 @@ import sys
 import math
 from tensorflow.examples.tutorials.mnist import input_data
 from bnn_mlp import binn_mlp_mnist
+from bnn_mlp import mlp_mnist
 from bnn_misc import compute_gradients
 import matplotlib.pyplot as plt
+import wandb
+import plotly
+
+wandb.init(project='modulo_nn', sync_tensorboard=True)
 
 def one_hot_labels(labels, dimension=10):
     res = np.zeros((labels.shape[0], dimension))
@@ -37,13 +42,24 @@ def shuffle(X,y):
 
     return X,y
 
-def train_epoch(inp, y, grad_m, training, acc, lo, X, lab, sess, train_bn_step, train_mod_step, batch_size=100):
+def train_epoch(inp, y, res, res1, grad_w, training, acc, lo, X, lab, sess, train_bn_step, batch_size=100):
     batches = int(len(X)/batch_size)
     for i in range(batches):
-        hist0 = sess.run([acc, lo, grad_m, train_bn_step, train_mod_step], feed_dict={inp:X[i*batch_size:(i+1)*batch_size], y: lab[i*batch_size:(i+1)*batch_size], training:True})
+        hist0 = sess.run([acc, lo, res, y, res1, grad_w, train_bn_step], feed_dict={inp:X[i*batch_size:(i+1)*batch_size], y: lab[i*batch_size:(i+1)*batch_size], training:True})
         print("Train accuracy: %f, Loss: %f" % (hist0[0], hist0[1]))
+        wandb.log({'Training Accuracy': hist0[0], 'Training Loss': hist0[1]})
+        #print(hist0[4][0,:])
+        #print(hist0[2][0,:])
+        #print(hist0[3][0,:])
+        #print(hist0[2][0][0:10][0:10])
+        #for i in grad_w:
+        #    print(i[1].name)
         #for grad, v in hist0[2]:
-        #    print(grad[1000:1002], v[1000:1002])
+        #    print(grad, v)
+            #if(np.isnan(np.sum(grad)) or np.isnan(np.sum(v))):
+            #   print("Is NAN true")
+            #   print(grad[1000:1002], v[1000:1002])
+
 
 def main():
     batch_size = 100
@@ -52,7 +68,7 @@ def main():
     n_output = 10
     drop_in = 0.2
     drop_hidden = 0.5
-    epochs = 10
+    epochs = 1
     learning_rate_start = 3e-2
     learning_rate_end = 3e-5
     learning_rate_decay = (learning_rate_end/learning_rate_start)**(1./epochs)
@@ -68,7 +84,15 @@ def main():
         mnist_data.train.labels[i] = mnist_data.train.labels[i] * 2 - 1
     for i in range(mnist_data.test.labels.shape[0]):
         mnist_data.test.labels[i] = mnist_data.test.labels[i] * 2 - 1
-        
+    
+    #Initializing WandB
+    wandb.config.batch_size = batch_size
+    wandb.config.epochs = epochs
+    wandb.config.n_hidden = 4096
+    wandb.config.learning_rate_start = learning_rate_start
+    wandb.config.learning_rate_end = learning_rate_end
+    wandb.config.learning_rate_decay = learning_rate_decay
+
     inp = tf.placeholder(tf.float32, [None, n_input])
     y = tf.placeholder(tf.float32, [None, n_output])
     training = tf.placeholder(tf.bool)
@@ -77,9 +101,10 @@ def main():
     learning_rate = tf.train.exponential_decay(learning_rate_start, global_step = g_step_kern, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=learning_rate_decay)
     lr_mod = tf.train.exponential_decay(lr_mod_start, global_step = g_step_mod, decay_steps = int(mnist_data.train.images.shape[0]/batch_size), decay_rate=lr_mod_decay)
     res = binn_mlp_mnist(inp, training=training)
-    cross_entropy = tf.square(tf.maximum(0., 1.-y*res))
+    gg= tf.maximum(0., 1.-y*res)
+    cross_entropy = tf.square(gg)
     loss = tf.reduce_mean(cross_entropy)
-    all_trainable_vars = [var for var in tf.trainable_variables() if not var.name.endswith('modulo:0')]
+    all_trainable_vars = [var for var in tf.trainable_variables()] # if not var.name.endswith('modulo:0')]
     train_mod_vars = [var for var in tf.trainable_variables() if var.name.endswith('modulo:0')]
     print("--All Trainable Vars------------------------>>>>>>>")
     print(all_trainable_vars)
@@ -94,11 +119,11 @@ def main():
     print("--End Update Ops---------------------------->>>>>>>")
     with tf.control_dependencies(update_operations):
         optimizer = tf.train.AdamOptimizer(learning_rate)
-        optimizer_mod = tf.train.AdamOptimizer(lr_mod)
+        #optimizer_mod = tf.train.AdamOptimizer(lr_mod)
         grad_w = optimizer.compute_gradients(loss = loss, var_list = all_trainable_vars)
         train_bn_step = optimizer.apply_gradients(grad_w, global_step = g_step_kern)
-        grad_m = optimizer_mod.compute_gradients(loss = loss, var_list = train_mod_vars)
-        train_mod_step = optimizer_mod.apply_gradients(grad_m, global_step = g_step_mod)
+        #grad_m = optimizer_mod.compute_gradients(loss = loss, var_list = train_mod_vars)
+        #train_mod_step = optimizer_mod.apply_gradients(grad_m, global_step = g_step_mod)
         #train_bn_step = optimizer.minimize(loss = loss, var_list=all_trainable_vars, global_step=g_step_kern)
     correct_pred = tf.equal(tf.argmax(res, 1), tf.argmax(y, 1))
     accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
@@ -113,7 +138,7 @@ def main():
     X_train, y_train = shuffle(mnist_data.train.images, mnist_data.train.labels)
     t_start = time.time()
     for i in range(epochs):
-        train_epoch(inp, y, grad_m, training, accuracy, loss, X_train, y_train, sess, train_bn_step, train_mod_step, batch_size)
+        train_epoch(inp, y, gg, res, grad_w, training, accuracy, loss, X_train, y_train, sess, train_bn_step, batch_size)
         X_train, y_train = shuffle(mnist_data.train.images, mnist_data.train.labels)
 
         hist = sess.run([accuracy, loss],
@@ -123,17 +148,61 @@ def main():
                         training: False
                     })
         print("Epoch %d, Test Acc: %f, Loss %f, Current Best Acc: %f" % (i, hist[0], hist[1], old_acc))
+        wandb.log({"Test Accuracy": hist[0], "Test Loss": hist[1]})
         if hist[0] > old_acc:
-            net_params = sess.run(tf.global_variables())
-            net_params = net_params[2:]
-            np.savez('bnn_mnist_10ep.npz', l0_w=net_params[0], l0_b=net_params[1], l0_gamma=net_params[2], l0_beta=net_params[3], l0_mean=net_params[4], l0_variance=net_params[5], l1_w=net_params[6], l1_b=net_params[7], l1_gamma=net_params[8], l1_beta = net_params[9], l1_mean=net_params[10], l1_variance=net_params[11], l2_w=net_params[12],l2_b=net_params[13], l2_gamma=net_params[14], l2_beta=net_params[15], l2_mean = net_params[16], l2_variance=net_params[17],l3_w=net_params[18],l3_b=net_params[19], l3_gamma=net_params[20], l3_beta=net_params[21], l3_mean = net_params[22], l3_variance=net_params[23])
             old_acc = hist[0]
             store_epoch = i
             save_path = saver.save(sess, "./binn_model/model.ckpt")
     t_end = time.time()
     np.set_printoptions(edgeitems=500)
-    reto = sess.run(res, feed_dict={inp: mnist_data.test.images[0:2], training:False})
-    print(reto)
+
+    net_params = sess.run(tf.global_variables())
+    net_params = net_params[2:]
+    plt.hist(net_params[0].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L0_w histogram with 64 Bins, Matrix Size: 784x4096": plt})
+    plt.clf()
+    plt.hist(net_params[1].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L0_b histogram with 64 Bins, Vector Size: 4096": plt})
+    plt.clf()
+    plt.hist(net_params[6].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L1_w histogram with 64 Bins, Matrix Size: 4096x4096": plt})
+    plt.clf()
+    plt.hist(net_params[7].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L1_b histogram with 64 Bins, Vector Size: 4096": plt})
+    plt.clf()
+    plt.hist(net_params[12].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L2_w histogram with 64 Bins, Matrix Size: 4096x4096": plt})
+    plt.clf()
+    plt.hist(net_params[13].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L2_b histogram with 64 Bins, Vector Size: 4096": plt})
+    plt.clf()
+    plt.hist(net_params[18].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L3_w histogram with 64 Bins, Matrix Size: 4096x10": plt})
+    plt.clf()
+    plt.hist(net_params[19].flatten(), bins=64)
+    plt.xlabel('Value Bin')
+    plt.ylabel('Number of Occurances')
+    wandb.log({"Flattened L3_b histogram with 64 Bins, Vector Size: 10": plt})
+    plt.clf()
+    #wandb.log({"L0_w Histogram": wandb.Histogram(np_histogram=np.histogram(net_params[0].flatten()))})
+    #wandb.log({"l0_weights":net_params[0].flatten()}, step=np.arange(0, len(net_params[0].flatten())))
+    #np.savez('bnn_mnist_10ep.npz', l0_w=net_params[0], l0_b=net_params[1], l0_gamma=net_params[2], l0_beta=net_params[3], l0_mean=net_params[4], l0_variance=net_params[5], l1_w=net_params[6], l1_b=net_params[7], l1_gamma=net_params[8], l1_beta = net_params[9], l1_mean=net_params[10], l1_variance=net_params[11], l2_w=net_params[12],l2_b=net_params[13], l2_gamma=net_params[14], l2_beta=net_params[15], l2_mean = net_params[16], l2_variance=net_params[17],l3_w=net_params[18],l3_b=net_params[19], l3_gamma=net_params[20], l3_beta=net_params[21], l3_mean = net_params[22], l3_variance=net_params[23])
+    #reto = sess.run(res, feed_dict={inp: mnist_data.test.images[0:2], training:False})
+    #print(reto)
     
    
     '''
